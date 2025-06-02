@@ -47,7 +47,7 @@ This repository contains the code and analytical documentation for a policy eval
  
 
 📬 Contact
-
+Author and researcher Brittany Spinner, M.Ed., M.S., Ph.D. Candidate
 For questions or collaboration inquiries, contact:
 📧 [spinner.prevsci@gmail.com]
 🔗 [https://www.linkedin.com/in/b-spinner-datasci/]
