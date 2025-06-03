@@ -1,7 +1,7 @@
 
 ---
 title: "Multi-City Fixed Effects DiD with Placebo & Parallel Trends Diagnostics"
-author: "Your Name"
+author: Brittany Spinner, M.S., Ph.D. Candidate
 output: html_document
 ---
 
