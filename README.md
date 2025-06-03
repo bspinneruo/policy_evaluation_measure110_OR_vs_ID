@@ -50,3 +50,4 @@ Author and researcher Brittany Spinner, M.Ed., M.S., Ph.D. Candidate
 For questions or collaboration inquiries, contact:
 📧 [spinner.prevsci@gmail.com]
 🔗 [https://www.linkedin.com/in/b-spinner-datasci/]
+written article available upon request
