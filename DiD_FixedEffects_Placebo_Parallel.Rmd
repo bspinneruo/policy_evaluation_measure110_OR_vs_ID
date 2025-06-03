@@ -1,0 +1,239 @@
+
+---
+title: "Multi-City Fixed Effects DiD with Placebo & Parallel Trends Diagnostics"
+author: "Your Name"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse, broom, lmtest, fixest, sandwich, here, modelsummary)
+
+```
+
+## Overview
+
+This analysis evaluates the effect of decriminalization in Eugene, Oregon using a Difference-in-Differences (DiD) design extended to multiple cities and outcomes. It includes fixed effects, placebo tests, and parallel trends diagnostics.
+
+## Simulated Panel Data
+
+```{r data}
+
+eug <- read.csv(here("data/Provisional Mortality Statistics, 2018 through Last Week Eugene.csv"))
+bois <- read.csv(here("data/Provisional Mortality Statistics Boise, 2018 through Last Week.csv"))
+```
+
+```{r}
+# Keep only Year and Crude Rate, and add a County label
+eug_clean <- eug %>%
+  select(Year, Crude.Rate) %>%
+  mutate(County = "Lane") %>% 
+  drop_na()
+
+bois_clean <- bois %>%
+  select(Year, Crude.Rate) %>%
+  mutate(County = "Ada") %>% 
+  drop_na()
+
+combined_data <- bind_rows(eug_clean, bois_clean) %>%
+  rename(DeathRate = Crude.Rate) %>%
+  mutate(
+    Post = ifelse(Year >= 2021, 1, 0),
+    Treat = ifelse(County == "Lane", 1, 0),
+    DID = Post * Treat
+  )
+```
+
+## Parallel Trends Check
+
+```{r trends}
+# set.seed(123)
+# data <- expand.grid(
+#   city = c("Eugene", "Pocatello", "Nampa", "Boise"),
+#   year = 2017:2022
+# ) %>%
+#   mutate(
+#     treatment_group = ifelse(city == "Eugene", 1, 0),
+#     post_policy = ifelse(year >= 2021, 1, 0),
+#     did = treatment_group * post_policy,
+#     overdose_rate = 30 + 3 * treatment_group - 2 * post_policy - 5 * did + rnorm(n(), 0, 3),
+#     arrest_rate = 140 - 4 * treatment_group + 2 * post_policy + 5 * did + rnorm(n(), 0, 5),
+#     treatment_admissions = 190 + 10 * treatment_group + 5 * post_policy + 15 * did + rnorm(n(), 0, 10)
+#   )
+### from simulation, idea for other analysis 
+
+# data_long <- data %>%
+#   pivot_longer(cols = c(overdose_rate, arrest_rate, treatment_admissions),
+#                names_to = "outcome", values_to = "value")
+# 
+# ggplot(data_long, aes(x = year, y = value, color = city)) +
+#   geom_line() +
+#   facet_wrap(~ outcome, scales = "free_y") +
+#   labs(title = "Parallel Trends Check (Pre-Treatment Years)", y = "Value", x = "Year") +
+#   geom_vline(xintercept = 2021, linetype = "dashed")+
+#   theme_minimal()
+
+combined_clean <- combined_data %>%
+  filter(!grepl("provisional", Year)) %>%
+  mutate(Year = as.numeric(as.character(Year)))
+
+# Filter pre-treatment years (before 2021)
+pre_data <- combined_clean %>% filter(Year < 2021)
+
+# Plot pre-trends only
+paral_trends <- ggplot(pre_data, aes(x = Year, y = DeathRate, color = County)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Pre-Policy Trends in Overdose Death Rates",
+    subtitle = "Lane vs. Ada County (2018–2020)",
+    x = "Year",
+    y = "Deaths per 100,000"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+print(paral_trends)
+ggsave(here("figures_tables/paral_trends.png"))
+## Parallel trends assumption 
+
+
+```
+
+
+```{r}
+
+
+# ==== Visualize the Trends with Intervention Line ====
+trends_plot <- ggplot(combined_data, aes(x = as.numeric(Year), y = DeathRate, color = County)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  geom_vline(xintercept = 2021, linetype = "dashed", color = "gray30") +
+  annotate("text", x = 2021.2, y = max(combined_data$DeathRate, na.rm = TRUE) - 1,
+           label = "Measure 110", hjust = 0, size = 4) +
+  labs(
+    title = "Crude Overdose Death Rates (2018–2023)",
+    subtitle = "Lane County (Eugene) vs. Ada County (Boise)",
+    x = "Year",
+    y = "Deaths per 100,000 Population",
+    color = "County"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "bottom"
+  )
+
+print(trends_plot)
+
+ggsave(here("figures_tables/trends_plot.png"))
+```
+
+
+
+```{r}
+# summary statistics
+# Convert Year to numeric and filter out provisional 2024 rows
+
+# Pivot to wide format: one column for each county's death rate
+wide_data <- combined_clean %>%
+  select(Year, County, DeathRate) %>%
+  pivot_wider(names_from = County, values_from = DeathRate)
+
+# View the reshaped dataset
+print(wide_data)
+library(modelsummary)
+
+datasummary_skim(wide_data,
+                 type = "all",
+                 fmt = 2,
+                 fun_numeric = list(Mean = Mean, SD = SD, Min = Min,  Max = Max),
+                 output = here("figures_tables/sum_stats.docx"))
+
+# 
+# skimr::skim(wide_data)
+
+
+## citation("fixest")
+```
+
+## Fixed Effects DiD Models
+
+```{r models}
+
+# ==== OLS DiD Regression ====
+did_model <- lm(DeathRate ~ Post + Treat + DID, data = combined_clean)
+summary(did_model)
+
+# What this model does:
+# 	•	Post: Captures change over time across all units
+# 	•	Treat: Captures baseline difference between Lane and Ada
+# 	•	DID: Captures the DiD estimate — the treatment effect
+# 
+#  Interpretation:
+# 	•	DID coefficient = estimated causal effect of Measure 110 on overdose rates
+# 	•	Check p-value for significance
+# 	•	Examine R² to see model fit
+
+# ==== Fixed Effects DiD Regression ====
+did_fe <- feols(DeathRate ~ Treat * Post | Year, data = combined_clean)
+summary(did_fe)
+
+#	•	Controls for time, but does not absorb differences between counties.
+# 	•	Treat * Post expands to: Treat, Post, DID
+# 	•	| County + Year adds fixed effects:
+# 	•	County FE: controls for all time-invariant differences (e.g., baseline mortality rates)
+# 	•	Year FE: controls for common shocks (e.g., national trends in fentanyl use)
+# 
+# Interpretation:
+# 	•	The coefficient on Treat:Post (aka DID) is my treatment effect
+# 	•	More robust to omitted variable bias than basic OLS
+# 	•	Standard errors are better estimated with clustered SEs 
+
+modelsummary(list(
+  `OLS Regression Model` = did_model,
+  `Fixed Effects Model` = did_fe),
+             fmt = 2,
+               statistic = "conf.int",
+             stars = TRUE) 
+  # output = here("figures_tables/mod_output.docx"))
+
+```
+
+```{r}
+# Add Clustered Standard Errors
+## The standard error is unrealistically small, and the p-value is artificially perfect, due to small cluster size 2 counties, don't use this, overfit the model 
+
+did_fe_robust <- feols(DeathRate ~ Treat * Post | County + Year, data = combined_clean,
+                       cluster = ~County)
+summary(did_fe_robust)
+```
+
+
+
+## Placebo Test (Using Pre-Treatment Years Only)
+
+```{r placebo}
+# Subset data to pre-treatment years only
+pre_data <- filter(data, year <= 2020)
+
+# Fake "placebo" policy year in 2019
+pre_data <- pre_data %>%
+  mutate(placebo_post = ifelse(year >= 2019, 1, 0),
+         placebo_did = placebo_post * treatment_group)
+
+placebo_results <- lapply(outcomes, function(outcome) {
+  model <- feols(as.formula(paste(outcome, "~ placebo_post * treatment_group | city + year")), data = pre_data, cluster = ~city)
+  tidy(model) %>%
+    mutate(outcome = outcome)
+})
+
+placebo_df <- bind_rows(placebo_results)
+placebo_df
+```
+
+## Interpretation
+
+- DiD estimates with fixed effects help control for city-specific and time-specific confounders.
+- **Parallel trends plots** visually check the pre-treatment alignment of trends.
+- **Placebo tests** ensure no "effect" is detected in pre-policy years, increasing internal validity.
+
